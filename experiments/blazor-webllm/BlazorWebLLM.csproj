@@ -13,4 +13,8 @@
     <PackageReference Include="Microsoft.Extensions.AI.Abstractions" Version="10.5.2" />
   </ItemGroup>
 
+  <ItemGroup>
+    <ProjectReference Include="..\..\external\cycod-wasm\src\cycod.core\cycod.core.csproj" />
+  </ItemGroup>
+
 </Project>

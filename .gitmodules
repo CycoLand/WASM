@@ -1,0 +1,3 @@
+[submodule "external/cycod-wasm"]
+	path = external/cycod-wasm
+	url = https://github.com/CycoLand/cycod-wasm.git

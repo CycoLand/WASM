@@ -1,6 +1,21 @@
 namespace BlazorWebLLM.Services;
 
 /// <summary>
+/// Indicates the level of function/tool calling support for a model.
+/// </summary>
+public enum ToolSupport
+{
+    /// <summary>Model does not support function calling.</summary>
+    None,
+    /// <summary>Model may work with simple tools but is not reliable.</summary>
+    Limited,
+    /// <summary>Model supports function calling well.</summary>
+    Good,
+    /// <summary>Model is specifically optimized for function calling.</summary>
+    Excellent
+}
+
+/// <summary>
 /// Represents information about an available LLM model.
 /// </summary>
 public class ModelInfo
@@ -11,6 +26,7 @@ public class ModelInfo
     public required string Size { get; init; }
     public required int Quality { get; init; }
     public required int Speed { get; init; }
+    public ToolSupport ToolSupport { get; init; } = ToolSupport.None;
     public bool IsCached { get; set; }
 }
 

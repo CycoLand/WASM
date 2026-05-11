@@ -61,6 +61,10 @@
                         <small class="text-muted">
                             Quality: @GetStars(_selectedModel.Quality) | Speed: @GetSpeedIndicator(_selectedModel.Speed) | Size: @_selectedModel.Size
                         </small>
+                        <br />
+                        <small class="@GetToolSupportClass(_selectedModel.ToolSupport)">
+                            🔧 Tools: @GetToolSupportLabel(_selectedModel.ToolSupport)
+                        </small>
                     </div>
                 }
             </div>
@@ -289,6 +293,24 @@
     {
         return string.Concat(Enumerable.Repeat("🚀", count));
     }
+
+    private static string GetToolSupportLabel(ToolSupport support) => support switch
+    {
+        ToolSupport.Excellent => "Excellent",
+        ToolSupport.Good => "Good",
+        ToolSupport.Limited => "Limited",
+        ToolSupport.None => "Not supported",
+        _ => "Unknown"
+    };
+
+    private static string GetToolSupportClass(ToolSupport support) => support switch
+    {
+        ToolSupport.Excellent => "text-success",
+        ToolSupport.Good => "text-info",
+        ToolSupport.Limited => "text-warning",
+        ToolSupport.None => "text-muted",
+        _ => "text-muted"
+    };
 
     public void Dispose()
     {

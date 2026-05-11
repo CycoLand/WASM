@@ -20,48 +20,53 @@ public class WebLLMModelManager : IModelManagerService, IAsyncDisposable
     [
         new ModelInfo
         {
-            Id = "Llama-3.2-1B-Instruct-q4f16_1-MLC",
-            Name = "Llama 3.2 (1B)",
-            Description = "Meta's latest small model - great quality for size",
-            Size = "~750MB",
-            Quality = 4,
-            Speed = 4
-        },
-        new ModelInfo
-        {
-            Id = "SmolLM2-1.7B-Instruct-q4f16_1-MLC",
-            Name = "SmolLM2 1.7B",
-            Description = "Great balance of quality and speed",
-            Size = "~1.0GB",
-            Quality = 4,
-            Speed = 4
+            Id = "Phi-3.5-mini-instruct-q4f16_1-MLC",
+            Name = "Phi 3.5 Mini (3.8B)",
+            Description = "Microsoft's powerful model - best for tool use",
+            Size = "~2.1GB",
+            Quality = 5,
+            Speed = 2,
+            ToolSupport = ToolSupport.Excellent
         },
         new ModelInfo
         {
             Id = "Qwen2.5-1.5B-Instruct-q4f16_1-MLC",
             Name = "Qwen 2.5 (1.5B)",
-            Description = "Alibaba's model - good quality, well optimized",
+            Description = "Good quality with solid tool support",
             Size = "~900MB",
             Quality = 3,
-            Speed = 4
+            Speed = 4,
+            ToolSupport = ToolSupport.Good
+        },
+        new ModelInfo
+        {
+            Id = "Llama-3.2-1B-Instruct-q4f16_1-MLC",
+            Name = "Llama 3.2 (1B)",
+            Description = "Meta's small model - may work with simple tools",
+            Size = "~750MB",
+            Quality = 4,
+            Speed = 4,
+            ToolSupport = ToolSupport.Limited
+        },
+        new ModelInfo
+        {
+            Id = "SmolLM2-1.7B-Instruct-q4f16_1-MLC",
+            Name = "SmolLM2 1.7B",
+            Description = "Fast and balanced - tool support untested",
+            Size = "~1.0GB",
+            Quality = 4,
+            Speed = 4,
+            ToolSupport = ToolSupport.Limited
         },
         new ModelInfo
         {
             Id = "Qwen2.5-0.5B-Instruct-q4f16_1-MLC",
             Name = "Qwen 2.5 (0.5B)",
-            Description = "Fastest loading, basic capabilities",
+            Description = "Fastest loading - too small for reliable tools",
             Size = "~350MB",
             Quality = 2,
-            Speed = 5
-        },
-        new ModelInfo
-        {
-            Id = "Phi-3.5-mini-instruct-q4f16_1-MLC",
-            Name = "Phi 3.5 Mini (3.8B)",
-            Description = "Microsoft's powerful small model - best quality",
-            Size = "~2.1GB",
-            Quality = 5,
-            Speed = 2
+            Speed = 5,
+            ToolSupport = ToolSupport.None
         }
     ];
 
