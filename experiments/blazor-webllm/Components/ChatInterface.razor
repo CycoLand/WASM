@@ -1,0 +1,218 @@
+@using BlazorWebLLM.Services
+@using Microsoft.Extensions.AI
+@inject IWebLLMChatService ChatService
+@inject IModelManagerService ModelManager
+@implements IDisposable
+
+<div class="chat-container">
+    <div class="chat-messages" @ref="_messagesContainer">
+        @if (!_messages.Any())
+        {
+            <div class="chat-welcome">
+                <h4>👋 Welcome to Browser LLM Chat!</h4>
+                <p>Load a model above, then start chatting. Everything runs locally in your browser!</p>
+            </div>
+        }
+        @foreach (var message in _messages)
+        {
+            <div class="chat-message @(message.Role == ChatRole.User ? "user" : "assistant")">
+                <div class="message-content">
+                    @if (message == _messages.LastOrDefault() && _isGenerating && message.Role == ChatRole.Assistant)
+                    {
+                        @((MarkupString)FormatMessage(GetMessageText(message)))
+                        <span class="typing-cursor">▋</span>
+                    }
+                    else
+                    {
+                        @((MarkupString)FormatMessage(GetMessageText(message)))
+                    }
+                </div>
+            </div>
+        }
+    </div>
+
+    <div class="chat-input-area">
+        <textarea @bind="_userInput" 
+                  @bind:event="oninput"
+                  @onkeydown="HandleKeyDown"
+                  placeholder="Type your message... (Shift+Enter for new line)"
+                  disabled="@(!ChatService.IsReady || _isGenerating)"
+                  rows="2"></textarea>
+        <button class="btn btn-primary" 
+                @onclick="SendMessage" 
+                disabled="@(!ChatService.IsReady || _isGenerating || string.IsNullOrWhiteSpace(_userInput))">
+            @if (_isGenerating)
+            {
+                <span class="spinner-border spinner-border-sm" role="status"></span>
+            }
+            else
+            {
+                <text>Send</text>
+            }
+        </button>
+    </div>
+
+    @if (_lastUsage != null)
+    {
+        <div class="chat-stats">
+            <span>🔢 @_lastUsage.OutputTokenCount tokens</span>
+            <span>⚡ @_tokensPerSecond.ToString("F1") tok/s</span>
+            <span>⏱️ @_generationTimeMs.ToString("F0") ms</span>
+        </div>
+    }
+</div>
+
+@code {
+    [Parameter]
+    public bool UseStreaming { get; set; } = true;
+
+    private List<ChatMessage> _messages = new();
+    private string _userInput = "";
+    private bool _isGenerating;
+    private UsageDetails? _lastUsage;
+    private double _tokensPerSecond;
+    private double _generationTimeMs;
+    private ElementReference _messagesContainer;
+
+    private async Task SendMessage()
+    {
+        var hasNoInput = string.IsNullOrWhiteSpace(_userInput);
+        if (hasNoInput || !ChatService.IsReady || _isGenerating) return;
+
+        var userMessage = _userInput.Trim();
+        _userInput = "";
+
+        // Add user message
+        _messages.Add(new ChatMessage(ChatRole.User, userMessage));
+
+        // Add placeholder for assistant response and track its index
+        _messages.Add(new ChatMessage(ChatRole.Assistant, ""));
+        var assistantMessageIndex = _messages.Count - 1;
+
+        _isGenerating = true;
+        _lastUsage = null;
+        var startTime = DateTime.UtcNow;
+
+        try
+        {
+            if (UseStreaming)
+            {
+                await GenerateStreamingResponse(assistantMessageIndex);
+            }
+            else
+            {
+                await GenerateCompleteResponse(assistantMessageIndex);
+            }
+
+            _generationTimeMs = (DateTime.UtcNow - startTime).TotalMilliseconds;
+            
+            if (_lastUsage?.OutputTokenCount > 0 && _generationTimeMs > 0)
+            {
+                _tokensPerSecond = _lastUsage.OutputTokenCount.Value / (_generationTimeMs / 1000.0);
+            }
+        }
+        catch (Exception ex)
+        {
+            // Update the assistant message with error
+            _messages[assistantMessageIndex] = new ChatMessage(ChatRole.Assistant, $"❌ Error: {ex.Message}");
+        }
+        finally
+        {
+            _isGenerating = false;
+            await ScrollToBottom();
+        }
+    }
+
+    private async Task GenerateStreamingResponse(int assistantMessageIndex)
+    {
+        var contentBuilder = new System.Text.StringBuilder();
+        var messagesWithSystem = GetMessagesWithSystemPrompt(assistantMessageIndex);
+
+        await foreach (var update in ChatService.GetStreamingResponseAsync(messagesWithSystem))
+        {
+            foreach (var content in update.Contents)
+            {
+                if (content is TextContent textContent)
+                {
+                    contentBuilder.Append(textContent.Text);
+                    _messages[assistantMessageIndex] = new ChatMessage(ChatRole.Assistant, contentBuilder.ToString());
+                    await InvokeAsync(StateHasChanged);
+                    await ScrollToBottom();
+                }
+                else if (content is UsageContent usageContent)
+                {
+                    _lastUsage = usageContent.Details;
+                }
+            }
+        }
+    }
+
+    private async Task GenerateCompleteResponse(int assistantMessageIndex)
+    {
+        var messagesWithSystem = GetMessagesWithSystemPrompt(assistantMessageIndex);
+        var response = await ChatService.GetResponseAsync(messagesWithSystem);
+        
+        var responseText = GetMessageText(response.Messages.FirstOrDefault() ?? new ChatMessage(ChatRole.Assistant, ""));
+        _messages[assistantMessageIndex] = new ChatMessage(ChatRole.Assistant, responseText);
+        
+        _lastUsage = response.Usage;
+    }
+
+    private List<ChatMessage> GetMessagesWithSystemPrompt(int assistantMessageIndex)
+    {
+        var systemPrompt = $"""
+            You are a helpful AI assistant running in the browser.
+            Current date and time: {DateTime.Now:dddd, MMMM d, yyyy 'at' h:mm tt}
+            Current timezone: {TimeZoneInfo.Local.DisplayName}
+            """;
+        
+        var messages = new List<ChatMessage>
+        {
+            new(ChatRole.System, systemPrompt)
+        };
+        messages.AddRange(_messages.Take(assistantMessageIndex));
+        return messages;
+    }
+
+    private static string GetMessageText(ChatMessage message)
+    {
+        return string.Join("", message.Contents.OfType<TextContent>().Select(c => c.Text));
+    }
+
+    private static string FormatMessage(string text)
+    {
+        // Basic formatting: convert newlines to <br> and escape HTML
+        return System.Net.WebUtility.HtmlEncode(text).Replace("\n", "<br />");
+    }
+
+    private async Task HandleKeyDown(KeyboardEventArgs e)
+    {
+        var isEnterWithoutShift = e.Key == "Enter" && !e.ShiftKey;
+        if (isEnterWithoutShift)
+        {
+            await SendMessage();
+        }
+    }
+
+    private async Task ScrollToBottom()
+    {
+        // Small delay to ensure DOM is updated
+        await Task.Delay(10);
+        // In a real app, use JS interop to scroll
+    }
+
+    protected override void OnInitialized()
+    {
+        ModelManager.ModelStateChanged += OnModelStateChanged;
+    }
+
+    private void OnModelStateChanged(object? sender, bool isLoaded)
+    {
+        InvokeAsync(StateHasChanged);
+    }
+
+    public void Dispose()
+    {
+        ModelManager.ModelStateChanged -= OnModelStateChanged;
+    }
+}

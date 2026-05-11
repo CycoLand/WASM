@@ -1,0 +1,56 @@
+# .NET
+bin/
+obj/
+*.dll
+*.exe
+*.pdb
+*.user
+*.suo
+*.cache
+*.log
+
+# IDE
+.vs/
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# Node.js (for transformers-js POC)
+node_modules/
+package-lock.json
+
+# Build outputs
+publish/
+out/
+
+# User-specific files
+*.rsuser
+*.user
+*.userosscache
+*.sln.docstates
+
+# Test results
+TestResults/
+coverage/
+
+# NuGet
+*.nupkg
+.nuget/
+packages/
+
+# Blazor
+wwwroot/_content/
+wwwroot/css/app.css.map
+
+# Exported models (large binary files)
+models/
+
+# Session logs
+*.jsonl

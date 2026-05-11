@@ -1,0 +1,298 @@
+@using BlazorWebLLM.Services
+@inject IModelManagerService ModelManager
+@implements IDisposable
+
+<div class="model-manager">
+    <details class="model-info-panel">
+        <summary><strong>⚙️ Model Info</strong></summary>
+        <div class="details-content">
+            <div class="cache-status-bar">
+                <div class="cache-info">
+                    <span class="cache-icon">💾</span>
+                    <span class="cache-text">
+                        @if (_cacheInfo != null && _cacheInfo.FileCount > 0)
+                        {
+                            <strong>@_cacheInfo.TotalSizeMB MB</strong>
+                            <text> cached</text>
+                            @if (_cacheInfo.CachedModelIds.Count > 0)
+                            {
+                                <br /><small>@string.Join(", ", _cacheInfo.CachedModelIds.Take(3))</small>
+                            }
+                        }
+                        else
+                        {
+                            <text>No models cached</text>
+                        }
+                    </span>
+                </div>
+                <div class="cache-buttons">
+                    @if (_isFileSystemSupported)
+                    {
+                        <button class="btn btn-sm btn-outline-primary" @onclick="ExportModels" disabled="@_isOperationInProgress">
+                            📤 Export
+                        </button>
+                        <button class="btn btn-sm btn-outline-success" @onclick="ImportModels" disabled="@_isOperationInProgress">
+                            📥 Import
+                        </button>
+                    }
+                    <button class="btn btn-sm btn-outline-danger" @onclick="ClearCache" 
+                            disabled="@(_isOperationInProgress || _cacheInfo?.FileCount == 0)">
+                        🗑️ Clear
+                    </button>
+                </div>
+            </div>
+
+            <div class="model-selector">
+                <div class="model-selector-header">
+                    <label for="modelSelect">Model:</label>
+                    <select id="modelSelect" class="form-select" @bind="_selectedModelId" disabled="@ModelManager.IsLoading">
+                        @foreach (var model in ModelManager.AvailableModels)
+                        {
+                            <option value="@model.Id">@model.Name (@model.Size)</option>
+                        }
+                    </select>
+                </div>
+
+                @if (_selectedModel != null)
+                {
+                    <div class="model-details">
+                        <strong>@_selectedModel.Name</strong><br />
+                        @_selectedModel.Description<br />
+                        <small class="text-muted">
+                            Quality: @GetStars(_selectedModel.Quality) | Speed: @GetSpeedIndicator(_selectedModel.Speed) | Size: @_selectedModel.Size
+                        </small>
+                    </div>
+                }
+            </div>
+        </div>
+    </details>
+
+    <div class="load-model-bar">
+        <button class="btn btn-primary" @onclick="LoadModel" 
+                disabled="@(ModelManager.IsLoading || string.IsNullOrEmpty(_selectedModelId))">
+            @if (ModelManager.IsLoading)
+            {
+                <span class="spinner-border spinner-border-sm" role="status"></span>
+                <text> Loading...</text>
+            }
+            else
+            {
+                <text>Load Model</text>
+            }
+        </button>
+        <div class="status-bar">
+            <div class="status-indicator @GetStatusClass()"></div>
+            <span class="status-text">@_statusMessage</span>
+        </div>
+    </div>
+
+    @if (ModelManager.IsLoading && _loadProgress != null)
+    {
+        <div class="progress-container">
+            <div class="progress">
+                <div class="progress-bar progress-bar-striped progress-bar-animated" 
+                     role="progressbar" 
+                     style="width: @(_loadProgress.Progress)%"
+                     aria-valuenow="@_loadProgress.Progress" 
+                     aria-valuemin="0" 
+                     aria-valuemax="100">
+                </div>
+            </div>
+            <small class="text-muted">@_loadProgress.Status</small>
+        </div>
+    }
+
+    @if (!string.IsNullOrEmpty(_operationMessage))
+    {
+        <div class="alert @(_operationSuccess ? "alert-success" : "alert-danger") mt-2" role="alert">
+            @_operationMessage
+        </div>
+    }
+</div>
+
+@code {
+    private string? _selectedModelId;
+    private ModelInfo? _selectedModel;
+    private CacheInfo? _cacheInfo;
+    private ModelLoadProgress? _loadProgress;
+    private string _statusMessage = "Select a model to begin";
+    private bool _isFileSystemSupported;
+    private bool _isOperationInProgress;
+    private string? _operationMessage;
+    private bool _operationSuccess;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _selectedModelId = ModelManager.AvailableModels.FirstOrDefault()?.Id;
+        UpdateSelectedModel();
+
+        ModelManager.LoadProgressChanged += OnLoadProgressChanged;
+        ModelManager.CacheStateChanged += OnCacheStateChanged;
+
+        _isFileSystemSupported = await ModelManager.IsFileSystemAccessSupportedAsync();
+        _cacheInfo = await ModelManager.GetCacheInfoAsync();
+
+        UpdateStatusMessage();
+    }
+
+    private void UpdateSelectedModel()
+    {
+        _selectedModel = ModelManager.AvailableModels.FirstOrDefault(m => m.Id == _selectedModelId);
+    }
+
+    private void UpdateStatusMessage()
+    {
+        if (ModelManager.IsModelLoaded)
+        {
+            var modelName = ModelManager.AvailableModels
+                .FirstOrDefault(m => m.Id == ModelManager.CurrentModelId)?.Name ?? ModelManager.CurrentModelId;
+            _statusMessage = $"✅ {modelName} ready!";
+        }
+        else if (ModelManager.IsLoading)
+        {
+            _statusMessage = "Loading model...";
+        }
+        else
+        {
+            _statusMessage = "Select a model and click 'Load Model' to begin";
+        }
+    }
+
+    private string GetStatusClass()
+    {
+        if (ModelManager.IsModelLoaded) return "status-ready";
+        if (ModelManager.IsLoading) return "status-loading";
+        return "status-idle";
+    }
+
+    private async Task LoadModel()
+    {
+        var hasNoModelSelected = string.IsNullOrEmpty(_selectedModelId);
+        if (hasNoModelSelected) return;
+
+        _operationMessage = null;
+        try
+        {
+            await ModelManager.LoadModelAsync(_selectedModelId!);
+            _cacheInfo = await ModelManager.GetCacheInfoAsync();
+        }
+        catch (Exception ex)
+        {
+            _operationMessage = $"Failed to load model: {ex.Message}";
+            _operationSuccess = false;
+        }
+        UpdateStatusMessage();
+    }
+
+    private async Task ClearCache()
+    {
+        var shouldCancel = !await ConfirmAsync("Clear all cached models? You will need to re-download them.");
+        if (shouldCancel) return;
+
+        _isOperationInProgress = true;
+        _operationMessage = null;
+        try
+        {
+            await ModelManager.ClearCacheAsync();
+            _cacheInfo = await ModelManager.GetCacheInfoAsync();
+            _operationMessage = "Cache cleared successfully!";
+            _operationSuccess = true;
+        }
+        catch (Exception ex)
+        {
+            _operationMessage = $"Failed to clear cache: {ex.Message}";
+            _operationSuccess = false;
+        }
+        finally
+        {
+            _isOperationInProgress = false;
+        }
+    }
+
+    private async Task ExportModels()
+    {
+        _isOperationInProgress = true;
+        _operationMessage = null;
+        try
+        {
+            var result = await ModelManager.ExportModelsToFolderAsync();
+            if (result.IsSuccess)
+            {
+                var sizeMB = (result.TotalBytes / 1024.0 / 1024.0).ToString("F1");
+                _operationMessage = $"Exported {result.FileCount} files ({sizeMB} MB) to {result.FolderName}";
+                _operationSuccess = true;
+            }
+            else
+            {
+                _operationMessage = result.ErrorMessage ?? "Export failed";
+                _operationSuccess = false;
+            }
+        }
+        finally
+        {
+            _isOperationInProgress = false;
+        }
+    }
+
+    private async Task ImportModels()
+    {
+        _isOperationInProgress = true;
+        _operationMessage = null;
+        try
+        {
+            var result = await ModelManager.ImportModelsFromFolderAsync();
+            if (result.IsSuccess)
+            {
+                var sizeMB = (result.TotalBytes / 1024.0 / 1024.0).ToString("F1");
+                _operationMessage = $"Imported {result.FileCount} files ({sizeMB} MB) from {result.FolderName}";
+                _operationSuccess = true;
+                _cacheInfo = await ModelManager.GetCacheInfoAsync();
+            }
+            else
+            {
+                _operationMessage = result.ErrorMessage ?? "Import failed";
+                _operationSuccess = false;
+            }
+        }
+        finally
+        {
+            _isOperationInProgress = false;
+        }
+    }
+
+    private void OnLoadProgressChanged(object? sender, ModelLoadProgress progress)
+    {
+        _loadProgress = progress;
+        UpdateStatusMessage();
+        InvokeAsync(StateHasChanged);
+    }
+
+    private void OnCacheStateChanged(object? sender, CacheInfo cacheInfo)
+    {
+        _cacheInfo = cacheInfo;
+        InvokeAsync(StateHasChanged);
+    }
+
+    private Task<bool> ConfirmAsync(string message)
+    {
+        // In a real app, use a proper dialog component
+        return Task.FromResult(true);
+    }
+
+    private static string GetStars(int count)
+    {
+        return string.Concat(Enumerable.Repeat("⭐", count)) + 
+               string.Concat(Enumerable.Repeat("☆", 5 - count));
+    }
+
+    private static string GetSpeedIndicator(int count)
+    {
+        return string.Concat(Enumerable.Repeat("🚀", count));
+    }
+
+    public void Dispose()
+    {
+        ModelManager.LoadProgressChanged -= OnLoadProgressChanged;
+        ModelManager.CacheStateChanged -= OnCacheStateChanged;
+    }
+}
