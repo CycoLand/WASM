@@ -1,33 +1,49 @@
 @using BlazorWebLLM.Services
+@using Cycod.Core.Chat
+@using Cycod.Core.FunctionCalling
+@using Cycod.Core.Tools
 @using Microsoft.Extensions.AI
 @inject IWebLLMChatService ChatService
 @inject IModelManagerService ModelManager
+@inject IJSRuntime JS
 @implements IDisposable
 
 <div class="chat-container">
     <div class="chat-messages" @ref="_messagesContainer">
-        @if (!_messages.Any())
+        @if (!_displayMessages.Any())
         {
             <div class="chat-welcome">
                 <h4>👋 Welcome to Browser LLM Chat!</h4>
-                <p>Load a model above, then start chatting. Everything runs locally in your browser!</p>
             </div>
         }
-        @foreach (var message in _messages)
+        @foreach (var message in _displayMessages)
         {
-            <div class="chat-message @(message.Role == ChatRole.User ? "user" : "assistant")">
-                <div class="message-content">
-                    @if (message == _messages.LastOrDefault() && _isGenerating && message.Role == ChatRole.Assistant)
-                    {
-                        @((MarkupString)FormatMessage(GetMessageText(message)))
-                        <span class="typing-cursor">▋</span>
-                    }
-                    else
-                    {
-                        @((MarkupString)FormatMessage(GetMessageText(message)))
-                    }
+            @if (message.IsTool)
+            {
+                <div class="chat-message tool">
+                    <div class="message-content tool-call">
+                        <span class="tool-icon">🔧</span>
+                        <span class="tool-name">@message.FunctionName</span>
+                        <span class="tool-result">@message.Text</span>
+                    </div>
                 </div>
-            </div>
+            }
+            else
+            {
+                <div class="chat-message @(message.IsUser ? "user" : "assistant")">
+                    <div class="message-content">
+                        @if (message == _displayMessages.LastOrDefault() && _isGenerating && !message.IsUser)
+                        {
+                            @((MarkupString)FormatMessage(message.Text))
+                            <span class="typing-cursor">▋</span>
+                        }
+                        else
+                        {
+                            @((MarkupString)FormatMessage(message.Text))
+                        }
+                    </div>
+                </div>
+            }
         }
     </div>
 
@@ -52,131 +68,189 @@
         </button>
     </div>
 
-    @if (_lastUsage != null)
-    {
-        <div class="chat-stats">
-            <span>🔢 @_lastUsage.OutputTokenCount tokens</span>
-            <span>⚡ @_tokensPerSecond.ToString("F1") tok/s</span>
+    <div class="chat-stats">
+        <span>🔧 @_toolCount tools available</span>
+        @if (_generationTimeMs > 0)
+        {
             <span>⏱️ @_generationTimeMs.ToString("F0") ms</span>
-        </div>
-    }
+        }
+    </div>
 </div>
 
 @code {
-    [Parameter]
-    public bool UseStreaming { get; set; } = true;
-
-    private List<ChatMessage> _messages = new();
+    // Use explicit type alias to avoid ambiguity with Microsoft.Extensions.Logging
+    private Cycod.Core.Providers.ILoggerProvider? _logger;
+    
+    private List<DisplayMessage> _displayMessages = new();
     private string _userInput = "";
+    private string _currentStreamingText = "";
     private bool _isGenerating;
-    private UsageDetails? _lastUsage;
-    private double _tokensPerSecond;
     private double _generationTimeMs;
+    private int _toolCount;
     private ElementReference _messagesContainer;
+
+    private FunctionCallingChat? _chat;
+
+    private class DisplayMessage
+    {
+        public string Text { get; set; } = "";
+        public string FunctionName { get; set; } = "";
+        public bool IsUser { get; set; }
+        public bool IsTool { get; set; }
+    }
+
+    protected override void OnInitialized()
+    {
+        ModelManager.ModelStateChanged += OnModelStateChanged;
+    }
+
+    private void OnModelStateChanged(object? sender, bool isLoaded)
+    {
+        if (isLoaded)
+        {
+            InitializeChat();
+        }
+        else
+        {
+            _chat = null;
+        }
+        InvokeAsync(StateHasChanged);
+    }
+
+    private void InitializeChat()
+    {
+        _logger = new BrowserLoggerProvider(Cycod.Core.Providers.LogLevel.Info);
+        var functionFactory = new FunctionFactory(_logger);
+
+        // Register built-in tools
+        functionFactory.AddFunctions(new DateAndTimeHelperFunctions());
+
+        _toolCount = functionFactory.GetAITools().Count();
+
+        var systemPrompt = BuildSystemPrompt();
+
+        _chat = new FunctionCallingChat(
+            ChatService,
+            systemPrompt,
+            functionFactory,
+            _logger);
+
+        _displayMessages.Clear();
+        Console.WriteLine($"[Chat] Initialized with {_toolCount} tools");
+    }
+
+    private string BuildSystemPrompt()
+    {
+        return $"""
+            You are a helpful AI assistant running entirely in the browser using WebLLM.
+            Everything runs locally - no data is sent to any server.
+
+            Current date and time: {DateTime.Now:dddd, MMMM d, yyyy 'at' h:mm tt}
+            Current timezone: {TimeZoneInfo.Local.DisplayName}
+
+            Available tools:
+            - GetCurrentDate: Get the current date
+            - GetCurrentTime: Get the current time
+            - GetCurrentDateTime: Get the current date and time
+            - GetDayOfWeek: Get the current day of the week
+
+            When asked about the current time, date, or day, use the appropriate tool.
+            When asked what tools you have access to, list the tools above.
+            Always be helpful, accurate, and concise.
+            """;
+    }
 
     private async Task SendMessage()
     {
         var hasNoInput = string.IsNullOrWhiteSpace(_userInput);
         if (hasNoInput || !ChatService.IsReady || _isGenerating) return;
 
+        if (_chat == null)
+        {
+            InitializeChat();
+        }
+
         var userMessage = _userInput.Trim();
         _userInput = "";
+        _currentStreamingText = "";
 
-        // Add user message
-        _messages.Add(new ChatMessage(ChatRole.User, userMessage));
-
-        // Add placeholder for assistant response and track its index
-        _messages.Add(new ChatMessage(ChatRole.Assistant, ""));
-        var assistantMessageIndex = _messages.Count - 1;
+        // Add user message to display
+        _displayMessages.Add(new DisplayMessage { Text = userMessage, IsUser = true });
+        StateHasChanged();
+        await ScrollToBottom();
 
         _isGenerating = true;
-        _lastUsage = null;
         var startTime = DateTime.UtcNow;
 
         try
         {
-            if (UseStreaming)
-            {
-                await GenerateStreamingResponse(assistantMessageIndex);
-            }
-            else
-            {
-                await GenerateCompleteResponse(assistantMessageIndex);
-            }
+            var response = await _chat!.SendMessageAsync(
+                userMessage,
+                onStreamUpdate: text =>
+                {
+                    _currentStreamingText += text;
+                    // Update the last assistant message or add a new one
+                    var lastMessage = _displayMessages.LastOrDefault();
+                    if (lastMessage != null && !lastMessage.IsUser && !lastMessage.IsTool)
+                    {
+                        lastMessage.Text = _currentStreamingText;
+                    }
+                    else
+                    {
+                        _displayMessages.Add(new DisplayMessage { Text = _currentStreamingText, IsUser = false });
+                    }
+                    InvokeAsync(async () =>
+                    {
+                        StateHasChanged();
+                        await ScrollToBottom();
+                    });
+                },
+                onFunctionCall: (name, args, result) =>
+                {
+                    if (result != null)
+                    {
+                        _displayMessages.Add(new DisplayMessage
+                        {
+                            Text = result.ToString() ?? "",
+                            FunctionName = name,
+                            IsTool = true
+                        });
+                        InvokeAsync(async () =>
+                        {
+                            StateHasChanged();
+                            await ScrollToBottom();
+                        });
+                    }
+                });
 
             _generationTimeMs = (DateTime.UtcNow - startTime).TotalMilliseconds;
-            
-            if (_lastUsage?.OutputTokenCount > 0 && _generationTimeMs > 0)
+
+            // Ensure final response is displayed
+            if (!string.IsNullOrEmpty(response))
             {
-                _tokensPerSecond = _lastUsage.OutputTokenCount.Value / (_generationTimeMs / 1000.0);
+                var lastMessage = _displayMessages.LastOrDefault();
+                if (lastMessage != null && !lastMessage.IsUser && !lastMessage.IsTool)
+                {
+                    lastMessage.Text = response;
+                }
+                else
+                {
+                    _displayMessages.Add(new DisplayMessage { Text = response, IsUser = false });
+                }
             }
         }
         catch (Exception ex)
         {
-            // Update the assistant message with error
-            _messages[assistantMessageIndex] = new ChatMessage(ChatRole.Assistant, $"❌ Error: {ex.Message}");
+            _displayMessages.Add(new DisplayMessage { Text = $"❌ Error: {ex.Message}", IsUser = false });
+            Console.WriteLine($"[Chat] Error: {ex}");
         }
         finally
         {
             _isGenerating = false;
+            _currentStreamingText = "";
+            StateHasChanged();
             await ScrollToBottom();
         }
-    }
-
-    private async Task GenerateStreamingResponse(int assistantMessageIndex)
-    {
-        var contentBuilder = new System.Text.StringBuilder();
-        var messagesWithSystem = GetMessagesWithSystemPrompt(assistantMessageIndex);
-
-        await foreach (var update in ChatService.GetStreamingResponseAsync(messagesWithSystem))
-        {
-            foreach (var content in update.Contents)
-            {
-                if (content is TextContent textContent)
-                {
-                    contentBuilder.Append(textContent.Text);
-                    _messages[assistantMessageIndex] = new ChatMessage(ChatRole.Assistant, contentBuilder.ToString());
-                    await InvokeAsync(StateHasChanged);
-                    await ScrollToBottom();
-                }
-                else if (content is UsageContent usageContent)
-                {
-                    _lastUsage = usageContent.Details;
-                }
-            }
-        }
-    }
-
-    private async Task GenerateCompleteResponse(int assistantMessageIndex)
-    {
-        var messagesWithSystem = GetMessagesWithSystemPrompt(assistantMessageIndex);
-        var response = await ChatService.GetResponseAsync(messagesWithSystem);
-        
-        var responseText = GetMessageText(response.Messages.FirstOrDefault() ?? new ChatMessage(ChatRole.Assistant, ""));
-        _messages[assistantMessageIndex] = new ChatMessage(ChatRole.Assistant, responseText);
-        
-        _lastUsage = response.Usage;
-    }
-
-    private List<ChatMessage> GetMessagesWithSystemPrompt(int assistantMessageIndex)
-    {
-        var systemPrompt = $"""
-            You are a helpful AI assistant running in the browser.
-            Current date and time: {DateTime.Now:dddd, MMMM d, yyyy 'at' h:mm tt}
-            Current timezone: {TimeZoneInfo.Local.DisplayName}
-            """;
-        
-        var messages = new List<ChatMessage>
-        {
-            new(ChatRole.System, systemPrompt)
-        };
-        messages.AddRange(_messages.Take(assistantMessageIndex));
-        return messages;
-    }
-
-    private static string GetMessageText(ChatMessage message)
-    {
-        return string.Join("", message.Contents.OfType<TextContent>().Select(c => c.Text));
     }
 
     private static string FormatMessage(string text)
@@ -196,19 +270,14 @@
 
     private async Task ScrollToBottom()
     {
-        // Small delay to ensure DOM is updated
-        await Task.Delay(10);
-        // In a real app, use JS interop to scroll
-    }
-
-    protected override void OnInitialized()
-    {
-        ModelManager.ModelStateChanged += OnModelStateChanged;
-    }
-
-    private void OnModelStateChanged(object? sender, bool isLoaded)
-    {
-        InvokeAsync(StateHasChanged);
+        try
+        {
+            await JS.InvokeVoidAsync("eval", "document.querySelector('.chat-messages')?.scrollTo(0, document.querySelector('.chat-messages')?.scrollHeight)");
+        }
+        catch
+        {
+            // Ignore scroll errors
+        }
     }
 
     public void Dispose()

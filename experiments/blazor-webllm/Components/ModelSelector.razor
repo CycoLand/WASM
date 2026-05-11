@@ -1,5 +1,6 @@
 @using BlazorWebLLM.Services
 @inject IModelManagerService ModelManager
+@inject IJSRuntime JS
 @implements IDisposable
 
 <div class="model-manager">
@@ -45,7 +46,7 @@
             <div class="model-selector">
                 <div class="model-selector-header">
                     <label for="modelSelect">Model:</label>
-                    <select id="modelSelect" class="form-select" @bind="_selectedModelId" disabled="@ModelManager.IsLoading">
+                    <select id="modelSelect" class="form-select" @bind="_selectedModelId" @bind:after="UpdateSelectedModel" disabled="@ModelManager.IsLoading">
                         @foreach (var model in ModelManager.AvailableModels)
                         {
                             <option value="@model.Id">@model.Name (@model.Size)</option>
@@ -125,9 +126,28 @@
     private string? _operationMessage;
     private bool _operationSuccess;
 
+    private const string LastModelKey = "blazor-webllm-last-model";
+
     protected override async Task OnInitializedAsync()
     {
-        _selectedModelId = ModelManager.AvailableModels.FirstOrDefault()?.Id;
+        // Try to restore last used model from localStorage
+        try
+        {
+            var lastModelId = await JS.InvokeAsync<string?>("localStorage.getItem", LastModelKey);
+            if (!string.IsNullOrEmpty(lastModelId) && ModelManager.AvailableModels.Any(m => m.Id == lastModelId))
+            {
+                _selectedModelId = lastModelId;
+            }
+            else
+            {
+                _selectedModelId = ModelManager.AvailableModels.FirstOrDefault()?.Id;
+            }
+        }
+        catch
+        {
+            _selectedModelId = ModelManager.AvailableModels.FirstOrDefault()?.Id;
+        }
+        
         UpdateSelectedModel();
 
         ModelManager.LoadProgressChanged += OnLoadProgressChanged;
@@ -179,6 +199,9 @@
         {
             await ModelManager.LoadModelAsync(_selectedModelId!);
             _cacheInfo = await ModelManager.GetCacheInfoAsync();
+            
+            // Save the successfully loaded model to localStorage
+            await JS.InvokeVoidAsync("localStorage.setItem", LastModelKey, _selectedModelId);
         }
         catch (Exception ex)
         {

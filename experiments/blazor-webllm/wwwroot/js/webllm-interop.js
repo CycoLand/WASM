@@ -123,7 +123,7 @@ export async function chatComplete(messages, options) {
         throw new Error("No model loaded");
     }
 
-    const response = await engine.chat.completions.create({
+    const requestOptions = {
         messages: messages,
         temperature: options.temperature,
         max_tokens: options.max_tokens,
@@ -132,7 +132,15 @@ export async function chatComplete(messages, options) {
         presence_penalty: options.presence_penalty,
         stop: options.stop,
         stream: false,
-    });
+    };
+
+    // Add tools if provided
+    if (options.tools && options.tools.length > 0) {
+        requestOptions.tools = options.tools;
+        requestOptions.tool_choice = options.tool_choice || "auto";
+    }
+
+    const response = await engine.chat.completions.create(requestOptions);
 
     return JSON.stringify(response);
 }
@@ -208,15 +216,26 @@ export async function chatCompleteStreaming(messages, options) {
     }
 }
 
-// Legacy polling-based streaming (keeping for reference)
+// Polling-based streaming
 export async function chatCompleteStreamingStart(messages, options) {
     if (!engine) {
         throw new Error("No model loaded");
     }
 
     const streamId = `stream_${++streamIdCounter}`;
+    console.log(`[WebLLM] Starting stream ${streamId}, activeStreams: ${activeStreams.size}`);
     
-    const stream = await engine.chat.completions.create({
+    // Clean up any leftover streams (shouldn't happen but just in case)
+    for (const [id, state] of activeStreams) {
+        if (state.iterator?.return) {
+            try {
+                await state.iterator.return();
+            } catch (e) { /* ignore */ }
+        }
+    }
+    activeStreams.clear();
+    
+    const requestOptions = {
         messages: messages,
         temperature: options.temperature,
         max_tokens: options.max_tokens,
@@ -226,15 +245,27 @@ export async function chatCompleteStreamingStart(messages, options) {
         stop: options.stop,
         stream: true,
         stream_options: { include_usage: true },
-    });
+    };
 
-    // Store the async iterator
+    // Add tools if provided
+    if (options.tools && options.tools.length > 0) {
+        requestOptions.tools = options.tools;
+        requestOptions.tool_choice = options.tool_choice || "auto";
+    }
+
+    console.log(`[WebLLM] Creating completion for stream ${streamId}...`);
+    console.log(`[WebLLM] Messages count: ${messages.length}`);
+    
+    const stream = await engine.chat.completions.create(requestOptions);
+    console.log(`[WebLLM] Got stream object for ${streamId}`);
+
     activeStreams.set(streamId, {
         iterator: stream[Symbol.asyncIterator](),
         done: false,
         usage: null,
     });
 
+    console.log(`[WebLLM] Stream ${streamId} ready`);
     return streamId;
 }
 
@@ -263,7 +294,8 @@ export async function chatCompleteStreamingNext(streamId) {
         }
 
         // Extract content from the chunk
-        const content = value.choices?.[0]?.delta?.content || "";
+        const delta = value.choices?.[0]?.delta;
+        const content = delta?.content || "";
         console.log(`[WebLLM] Stream ${streamId} chunk: "${content}"`);
         
         // Check for usage info (sent in final chunk)
@@ -281,10 +313,27 @@ export async function chatCompleteStreamingNext(streamId) {
             streamState.done = true;
         }
 
-        return JSON.stringify({
+        // Build response with tool calls if present
+        const response = {
             content: content,
             isDone: false,
-        });
+            finishReason: finishReason || null,
+        };
+
+        // Include tool calls if present in delta
+        if (delta?.tool_calls && delta.tool_calls.length > 0) {
+            response.toolCalls = delta.tool_calls.map(tc => ({
+                id: tc.id || null,
+                index: tc.index || 0,
+                type: tc.type || "function",
+                function: tc.function ? {
+                    name: tc.function.name || null,
+                    arguments: tc.function.arguments || null,
+                } : null,
+            }));
+        }
+
+        return JSON.stringify(response);
     } catch (error) {
         console.error("[WebLLM] Streaming error:", error);
         activeStreams.delete(streamId);
