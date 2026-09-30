@@ -8,6 +8,8 @@ WebAssembly experiments for running AI/LLM capabilities in the browser.
 
 A Blazor WebAssembly application that runs LLMs entirely in the browser using [WebLLM](https://webllm.mlc.ai/). 
 
+<img width="3840" height="2180" alt="localhost_5054_" src="https://github.com/user-attachments/assets/642d9bad-460c-46af-8426-fa68e665867c" />
+
 **Features:**
 - 🧠 In-browser LLM inference with WebGPU acceleration
 - 🔧 Function calling support via cycod.core's `FunctionCallingChat`
