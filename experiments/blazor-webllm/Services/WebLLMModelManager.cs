@@ -18,25 +18,87 @@ public class WebLLMModelManager : IModelManagerService, IAsyncDisposable
 
     private static readonly List<ModelInfo> _availableModels =
     [
+        // Hermes models: officially listed in WebLLM's functionCallingModelIds,
+        // fine-tuned by Nous Research specifically for reliable tool calling.
         new ModelInfo
         {
-            Id = "Phi-3.5-mini-instruct-q4f16_1-MLC",
-            Name = "Phi 3.5 Mini (3.8B)",
-            Description = "Microsoft's powerful model - best for tool use",
-            Size = "~2.1GB",
+            Id = "Hermes-3-Llama-3.1-8B-q4f16_1-MLC",
+            Name = "Hermes 3 - Llama 3.1 (8B)",
+            Description = "Nous Research fine-tune purpose-built for tool calling - officially supported by WebLLM",
+            Size = "~4.9GB",
             Quality = 5,
             Speed = 2,
             ToolSupport = ToolSupport.Excellent
         },
         new ModelInfo
         {
+            Id = "Hermes-2-Pro-Llama-3-8B-q4f16_1-MLC",
+            Name = "Hermes 2 Pro - Llama 3 (8B)",
+            Description = "Earlier Nous Research tool-calling fine-tune - officially supported by WebLLM",
+            Size = "~5.0GB",
+            Quality = 4,
+            Speed = 2,
+            ToolSupport = ToolSupport.Excellent
+        },
+        new ModelInfo
+        {
+            Id = "Hermes-2-Pro-Mistral-7B-q4f16_1-MLC",
+            Name = "Hermes 2 Pro - Mistral (7B)",
+            Description = "Mistral-based tool-calling fine-tune - officially supported by WebLLM",
+            Size = "~4.0GB",
+            Quality = 4,
+            Speed = 2,
+            ToolSupport = ToolSupport.Excellent
+        },
+        new ModelInfo
+        {
+            Id = "Phi-3.5-mini-instruct-q4f16_1-MLC",
+            Name = "Phi 3.5 Mini (3.8B)",
+            Description = "Microsoft's powerful model - handles tools reasonably well but not in WebLLM's official tool-calling list",
+            Size = "~2.1GB",
+            Quality = 5,
+            Speed = 2,
+            ToolSupport = ToolSupport.Good
+        },
+        new ModelInfo
+        {
+            Id = "Phi-4-mini-instruct-q4f16_1-MLC",
+            Name = "Phi 4 Mini",
+            Description = "Successor to Phi 3.5 Mini - smaller footprint, tool support untested",
+            Size = "~3.4GB",
+            Quality = 5,
+            Speed = 3,
+            ToolSupport = ToolSupport.Limited
+        },
+        new ModelInfo
+        {
+            Id = "Qwen3-4B-q4f16_1-MLC",
+            Name = "Qwen 3 (4B)",
+            Description = "Newer Qwen generation with thinking-mode toggle - tool support untested",
+            Size = "~3.4GB",
+            Quality = 4,
+            Speed = 3,
+            ToolSupport = ToolSupport.Limited
+        },
+        new ModelInfo
+        {
             Id = "Qwen2.5-1.5B-Instruct-q4f16_1-MLC",
             Name = "Qwen 2.5 (1.5B)",
-            Description = "Good quality with solid tool support",
+            Description = "Good quality but not in WebLLM's official tool-calling list",
             Size = "~900MB",
             Quality = 3,
             Speed = 4,
-            ToolSupport = ToolSupport.Good
+            ToolSupport = ToolSupport.Limited
+        },
+        new ModelInfo
+        {
+            Id = "Qwen3-1.7B-q4f16_1-MLC",
+            Name = "Qwen 3 (1.7B)",
+            Description = "Small/fast Qwen3 generation - tool support untested",
+            Size = "~2.0GB",
+            Quality = 3,
+            Speed = 4,
+            ToolSupport = ToolSupport.Limited
         },
         new ModelInfo
         {
@@ -57,6 +119,16 @@ public class WebLLMModelManager : IModelManagerService, IAsyncDisposable
             Quality = 4,
             Speed = 4,
             ToolSupport = ToolSupport.Limited
+        },
+        new ModelInfo
+        {
+            Id = "gemma3-1b-it-q4f16_1-MLC",
+            Name = "Gemma 3 (1B)",
+            Description = "Tiny and fast - too small for reliable tools",
+            Size = "~0.7GB",
+            Quality = 3,
+            Speed = 5,
+            ToolSupport = ToolSupport.None
         },
         new ModelInfo
         {
